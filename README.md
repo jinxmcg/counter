@@ -4,7 +4,7 @@ This is a simple counter application written in Go. It exposes an HTTP API that 
 
 Because the counter is stored in memory, it will be reset if the application restarts and also if the application is scaled to multiple pods in a Kubernetes environment will not be synchronized. 
 
-Scalability can be achieved not by scaling number of replicas but by scaling the CPU cores of the deployment. If we want to increase number of replicas we need to use a synchronizing mechanism by using a database such as Redis with connection pooling and scripts inside Redis server to reduce number of roundtrips by a factor of 3.
+Scalability can be achieved not by scaling number of replicas but by scaling the CPU cores of the deployment. If we want to increase number of replicas we need to use a synchronizing mechanism by using a database such as Redis with connection pooling and scripts inside Redis server to reduce number of roundtrips by a factor of at least 3.
 
 ## API Endpoints
 
