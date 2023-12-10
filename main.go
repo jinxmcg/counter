@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -11,12 +10,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/go-redis/redis/v8"
 	"github.com/goccy/go-json" // drop in replacement for encoding/json
 	"github.com/valyala/fasthttp"
 )
 
 var (
-	ctx = context.Background()
+	GlobalCtx = context.Background()
 )
 
 // json returns a JSON response with the given status code and JSON object.
@@ -39,104 +39,135 @@ var status statusAtomic
 var statusV2 ReturnStatus // mutex allows to use the full struct
 var statusV2Mutex sync.Mutex
 
-type statusV3Message struct{}
-
-var statusV3UpdateChannel = make(chan statusV3Message) // once channel for all requests
-var statusV3 ReturnStatus
+var RedisClient *redis.Client
+var LuaScriptSHA1 string
 
 func init() {
-	fmt.Println("Inited")
+	log.Println("Inited")
+
+	// Initialize Redis client
+	RedisClient = redis.NewClient(&redis.Options{
+		Addr:     "localhost:6379", // or your Redis server address
+		Password: "",               // no password set
+		DB:       0,                // use default DB
+	})
+
+	// Optional: Check the connection
+	_, err := RedisClient.Ping(GlobalCtx).Result()
+	if err != nil {
+		log.Fatalf("Failed to connect to Redis: %s", err)
+	}
+
+	// Lua script
+	luaScript := `
+	-- Lua script to increment the counter, toggle the status, and set the last changed time
+	local counter = redis.call('INCR', 'counter')
+	local currentStatus = redis.call('GET', 'status')
+	if currentStatus == false then
+		currentStatus = 0
+	else
+		currentStatus = tonumber(currentStatus)
+	end
+	local newStatus = 1 - currentStatus
+	redis.call('SET', 'status', newStatus)
+	local lastChanged = ARGV[1]
+	redis.call('SET', 'lastChanged', lastChanged)
+	return {counter, newStatus, lastChanged}`
+
+	// Load Lua script into Redis
+	sha1, err := RedisClient.ScriptLoad(GlobalCtx, luaScript).Result()
+	if err != nil {
+		log.Fatalf("Failed to load Lua script: %s", err)
+	}
+
+	LuaScriptSHA1 = sha1
+	log.Printf("Redis sha %s", LuaScriptSHA1)
+
 }
 
-func statusHandlerAtomic(ctx *fasthttp.RequestCtx, appCtx context.Context) {
+func statusHandlerAtomic(ctx *fasthttp.RequestCtx) {
 
-	select {
-	case <-appCtx.Done():
-		// The context has been cancelled, stop processing
+	tmpStatus := atomic.LoadInt64(&status.Status)
+	atomic.StoreInt64(&status.Status, 1-tmpStatus)
+	atomic.StoreInt64(&status.LastChanged, time.Now().Unix())
+
+	responseStatus := ReturnStatus{
+		Counter:     atomic.AddInt64(&status.Counter, 1),
+		Status:      (1 - tmpStatus) != 0,
+		LastChanged: time.Unix(atomic.LoadInt64(&status.LastChanged), 0),
+	}
+
+	ctx.Response.Header.Set("Content-Type", "application/json")
+	if err := json.NewEncoder(ctx).Encode(responseStatus); err != nil {
+		ctx.Error(err.Error(), fasthttp.StatusInternalServerError)
+	}
+
+}
+
+func statusHandlerMutex(ctx *fasthttp.RequestCtx) {
+	statusV2Mutex.Lock()
+	statusV2.Counter++
+	statusV2.Status = !statusV2.Status
+	statusV2.LastChanged = time.Now()
+
+	// Convert the status to JSON before unlocking
+	response, err := json.Marshal(statusV2)
+	statusV2Mutex.Unlock()
+
+	if err != nil {
+		// If there is an error in marshaling, handle it here
+		ctx.Error(err.Error(), fasthttp.StatusInternalServerError)
 		return
-	default:
-		tmpStatus := atomic.LoadInt64(&status.Status)
-		atomic.StoreInt64(&status.Status, 1-tmpStatus)
-		atomic.StoreInt64(&status.LastChanged, time.Now().Unix())
-
-		responseStatus := ReturnStatus{
-			Counter:     atomic.AddInt64(&status.Counter, 1),
-			Status:      (1 - tmpStatus) != 0,
-			LastChanged: time.Unix(atomic.LoadInt64(&status.LastChanged), 0),
-		}
-		ctx.Response.Header.Set("Content-Type", "application/json")
-		if err := json.NewEncoder(ctx).Encode(responseStatus); err != nil {
-			ctx.Error(err.Error(), fasthttp.StatusInternalServerError)
-		}
 	}
 
+	ctx.Response.Header.Set("Content-Type", "application/json")
+	// Write the JSON response
+	ctx.Response.SetBody(response)
 }
 
-func statusHandlerMutex(ctx *fasthttp.RequestCtx, appCtx context.Context) {
-	select {
-	case <-appCtx.Done():
-		// The context has been cancelled, stop processing
+func statusHandlerRedis(ctx *fasthttp.RequestCtx) {
+	lastChanged := time.Now().Unix()
+	result, err := RedisClient.EvalSha(GlobalCtx, LuaScriptSHA1, []string{}, lastChanged).Result()
+	if err != nil {
+		ctx.Error("Failed to execute Lua script", fasthttp.StatusInternalServerError)
 		return
-	default:
-		statusV2Mutex.Lock()
-		statusV2.Counter++
-		statusV2.Status = !statusV2.Status
-		statusV2.LastChanged = time.Now()
-
-		// Convert the status to JSON before unlocking
-		response, err := json.Marshal(statusV2)
-		statusV2Mutex.Unlock()
-
-		if err != nil {
-			// If there is an error in marshaling, handle it here
-			ctx.Error(err.Error(), fasthttp.StatusInternalServerError)
-			return
-		}
-
-		ctx.Response.Header.Set("Content-Type", "application/json")
-		// Write the JSON response
-		ctx.Response.SetBody(response)
 	}
 
-}
-
-func statusHandlerGoSub(ctx *fasthttp.RequestCtx, appCtx context.Context) {
-
-	select {
-	case <-appCtx.Done():
-		// The context has been cancelled, stop processing
+	resultSlice, ok := result.([]interface{})
+	if !ok || len(resultSlice) != 3 {
+		ctx.Error("Invalid script result", fasthttp.StatusInternalServerError)
 		return
-	default:
-		// The context has not been cancelled, continue processing
-		statusV3UpdateChannel <- statusV3Message{}
-		ctx.Response.Header.Set("Content-Type", "application/json")
-		if err := json.NewEncoder(ctx).Encode(statusV3); err != nil {
-			ctx.Error(err.Error(), fasthttp.StatusInternalServerError)
-		}
+	}
+
+	// Parse results
+	counter, _ := resultSlice[0].(int64)
+	newStatus, _ := resultSlice[1].(int64)
+	// Last changed is already known
+
+	// Create response
+	responseStatus := ReturnStatus{
+		Counter:     counter,
+		Status:      newStatus != 0,
+		LastChanged: time.Unix(lastChanged, 0),
+	}
+
+	ctx.Response.Header.Set("Content-Type", "application/json")
+	if err := json.NewEncoder(ctx).Encode(responseStatus); err != nil {
+		ctx.Error(err.Error(), fasthttp.StatusInternalServerError)
 	}
 }
 
-func statusHandlerRedis(ctx *fasthttp.RequestCtx, appCtx context.Context) {
-	select {
-	case <-appCtx.Done():
-		// The context has been cancelled, stop processing
-		return
-	default:
-		// The context has not been cancelled, continue processing
-	}
+// Liveness probe handler
+func livenessHandler(ctx *fasthttp.RequestCtx) {
+	ctx.SetStatusCode(fasthttp.StatusOK)
 }
 
-func statusV3Update(ctx context.Context) {
-	for {
-		select {
-		case <-statusV3UpdateChannel:
-			statusV3.Counter++
-			statusV3.Status = !statusV3.Status
-			statusV3.LastChanged = time.Now()
-		case <-ctx.Done():
-			return // Exit the goroutine when the context is cancelled
-		}
-	}
+// Readiness probe handler
+func readinessHandler(ctx *fasthttp.RequestCtx) {
+	// Here you can add logic to check if the server is ready to accept traffic
+	// For example, check if a database connection is established
+	// For simplicity, this example always returns HTTP 200
+	ctx.SetStatusCode(fasthttp.StatusOK)
 }
 
 func main() {
@@ -146,19 +177,18 @@ func main() {
 	// Catch SIGINT (Ctrl+C) and SIGTERM signals
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	appCtx, cancelCtx := context.WithCancel(context.Background())
-	go statusV3Update(appCtx)
-
 	h := func(ctx *fasthttp.RequestCtx) {
 		switch string(ctx.Path()) {
 		case "/status":
-			statusHandlerAtomic(ctx, appCtx)
+			statusHandlerAtomic(ctx)
 		case "/statusV2":
-			statusHandlerMutex(ctx, appCtx)
+			statusHandlerMutex(ctx)
 		case "/statusV3":
-			statusHandlerGoSub(ctx, appCtx)
-		case "/statusV4":
-			statusHandlerRedis(ctx, appCtx)
+			statusHandlerRedis(ctx)
+		case "/health": // Liveness probe endpoint
+			livenessHandler(ctx)
+		case "/ready": // Readiness probe endpoint
+			readinessHandler(ctx)
 		default:
 			ctx.Error("Unsupported path", fasthttp.StatusNotFound)
 		}
@@ -179,7 +209,5 @@ func main() {
 	if shutdownErr != nil {
 		log.Fatalf("Error during shutdown: %s", shutdownErr)
 	}
-	cancelCtx()
 	log.Println("Server gracefully stopped")
-
 }

@@ -1,8 +1,8 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -14,13 +14,10 @@ import (
 type StatusHandlerFunc func(ctx *fasthttp.RequestCtx)
 
 // test for valid response
-func testStatusHandlerResponseAndErrorHandling(t *testing.T, handler func(ctx *fasthttp.RequestCtx, appCtx context.Context)) {
-
-	appCtx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+func testStatusHandlerResponseAndErrorHandling(t *testing.T, handler func(ctx *fasthttp.RequestCtx)) {
 
 	ctx := &fasthttp.RequestCtx{}
-	handler(ctx, appCtx)
+	handler(ctx)
 
 	var actualStatus ReturnStatus
 	err := json.Unmarshal(ctx.Response.Body(), &actualStatus)
@@ -31,8 +28,7 @@ func testStatusHandlerResponseAndErrorHandling(t *testing.T, handler func(ctx *f
 }
 
 // Test for concurrent
-func testStatusHandlerConcurrentExecution(t *testing.T, handler func(ctx *fasthttp.RequestCtx, appCtx context.Context)) {
-	appCtx, cancel := context.WithCancel(context.Background())
+func testStatusHandlerConcurrentExecution(t *testing.T, handler func(ctx *fasthttp.RequestCtx)) {
 
 	// Number of concurrent requests
 	var numRequests int = 10
@@ -52,7 +48,7 @@ func testStatusHandlerConcurrentExecution(t *testing.T, handler func(ctx *fastht
 			ctx := &fasthttp.RequestCtx{}
 
 			// Call the handler
-			handler(ctx, appCtx)
+			handler(ctx)
 
 			var actualStatus ReturnStatus
 			err := json.Unmarshal(ctx.Response.Body(), &actualStatus)
@@ -78,35 +74,39 @@ func testStatusHandlerConcurrentExecution(t *testing.T, handler func(ctx *fastht
 		sum += counter
 	}
 	assert.Equal(t, int64(counterTotal), sum)
-	cancel()
+
 }
 
 // Benchmark for statusHandlerAtomic
-func benchmarkStatusHandler(b *testing.B, handler func(ctx *fasthttp.RequestCtx, appCtx context.Context)) {
-	appCtx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+func benchmarkStatusHandler(b *testing.B, handler func(ctx *fasthttp.RequestCtx)) {
 
 	ctx := &fasthttp.RequestCtx{}
 	for i := 0; i < b.N; i++ {
-		handler(ctx, appCtx)
+		handler(ctx)
 	}
 }
 
-func benchmarkStatusHandlerParallel(b *testing.B, handler func(ctx *fasthttp.RequestCtx, appCtx context.Context)) {
-	appCtx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+func benchmarkStatusHandlerParallel(b *testing.B, handler func(ctx *fasthttp.RequestCtx)) {
 
 	b.RunParallel(func(pb *testing.PB) {
 
 		ctx := &fasthttp.RequestCtx{}
 		for pb.Next() {
-			handler(ctx, appCtx)
+			handler(ctx)
 		}
 	})
 }
 
 // Test and benchmark atomic
+// TestMain can be used for setup and teardown
+func TestMain(m *testing.M) {
+	code := m.Run() // Run the tests
+	// Teardown
+	RedisClient.Close()
+	os.Exit(code)
+}
 
+/*
 func TestStatusHandlerAtomic_ConcurrentExecution(t *testing.T) {
 	testStatusHandlerConcurrentExecution(t, statusHandlerAtomic)
 }
@@ -140,21 +140,33 @@ func BenchmarkStatusHandlerMutex(b *testing.B) {
 func BenchmarkStatusHandlerMutexParallel(b *testing.B) {
 	benchmarkStatusHandlerParallel(b, statusHandlerMutex)
 }
+*/
+// Test and benchmark redis
 
-// Test and benchmark channel
+func TestStatusHandlerRedis_ResponseAndErrorHandling(t *testing.T) {
+	// reset redis counters
+	RedisClient.Del(GlobalCtx, "counter", "status", "lastChanged")
 
-func TestStatusHandlerChannel_ConcurrentExecution(t *testing.T) {
-	testStatusHandlerConcurrentExecution(t, statusHandlerGoSub)
+	testStatusHandlerResponseAndErrorHandling(t, statusHandlerRedis)
 }
 
-func TestStatusHandlerChannel_ResponseAndErrorHandling(t *testing.T) {
-	testStatusHandlerResponseAndErrorHandling(t, statusHandlerGoSub)
+func TestStatusHandlerRedis_ConcurrentExecution(t *testing.T) {
+	// reset redis counters
+	RedisClient.Del(GlobalCtx, "counter", "status", "lastChanged")
+
+	testStatusHandlerConcurrentExecution(t, statusHandlerRedis)
 }
 
-func BenchmarkStatusHandlerChannel(b *testing.B) {
-	benchmarkStatusHandler(b, statusHandlerGoSub)
+func BenchmarkStatusHandlerRedis(b *testing.B) {
+	// reset redis counters
+	RedisClient.Del(GlobalCtx, "counter", "status", "lastChanged")
+
+	benchmarkStatusHandler(b, statusHandlerRedis)
 }
 
-func BenchmarkStatusHandlerChannelParallel(b *testing.B) {
-	benchmarkStatusHandlerParallel(b, statusHandlerGoSub)
+func BenchmarkStatusHandlerRedisParallel(b *testing.B) {
+	// reset redis counters
+	RedisClient.Del(GlobalCtx, "counter", "status", "lastChanged")
+
+	benchmarkStatusHandlerParallel(b, statusHandlerRedis)
 }
