@@ -25,7 +25,7 @@ curl http://127.0.0.1/statusV2
 
 - `/ready`: Returns a 200 OK response. Used for readiness probes in a Kubernetes environment.
 
-## Running the Application Locally
+## Running the Application Locally and developing
 
 1. Install Go: Follow the instructions at https://golang.org/doc/install to download and install Go.
 
@@ -82,6 +82,10 @@ ok      counter 8.702s
 
 
 ## Deployment
+
+**Prerequisites:**
+- Docker
+- Kubernetes cluster (e.g. k3s or cloud environment)
 
 The application can be deployed in a Kubernetes environment. A `Dockerfile` is provided for building a Docker image of the application, and a `kubernetes.yaml` file is provided for creating a Kubernetes Deployment, Service and Ingress.
 
