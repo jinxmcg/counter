@@ -2,9 +2,13 @@
 
 This is a simple counter application written in Go. It exposes an HTTP API that allows you to increment a counter and get its current value. The application is optimized for performance and can be deployed in a Kubernetes environment.
 
-Because the counter is stored in memory, it will be reset if the application restarts and also if the application is scaled to multiple pods in a Kubernetes environment will not be synchronized. 
-
-Scalability can be achieved not by scaling number of replicas but by scaling the CPU cores of the deployment. If we want to increase number of replicas we need to use a synchronizing mechanism by using a database such as Redis with connection pooling and scripts inside Redis server to reduce number of roundtrips by a factor of at least 3.
+### Table of Contents
+- [API Endpoints](#api-endpoints)
+- [Running the Application Locally and developing](#running-the-application-locally-and-developing)
+- [Running tests and benchmarks](#running-tests-and-benchmarks)
+- [Deployment](#deployment)
+- [Performance Optimizations](#performance-optimizations)
+- [TODO](#todo)
 
 ## API Endpoints
 
@@ -109,7 +113,13 @@ The Kubernetes Deployment includes liveness and readiness probes that hit the `/
 The application uses atomic operations for incrementing the counter, which is faster and more efficient than using a mutex. However, a version of the counter that uses a mutex (`/statusV2`) is also provided for comparison.
 
 In Go benchmarks, the atomic operations (/status endpoint) outperform mutex-based operations (/statusV2 endpoint) due to their lower overhead. 
+
 However, in a real-world K8s environment, the situation changes. High concurrency and frequent context switching can make atomic operations less efficient due to cache coherency issues. Mutexes, despite their higher overhead, can sometimes be more efficient in such scenarios because they reduce the frequency of cache invalidation across cores.
+
+Because the counter is stored in memory, it will be reset if the application restarts and also if the application is scaled to multiple pods in a Kubernetes environment will not be synchronized. 
+
+Scalability can be achieved not by scaling number of replicas but by scaling the CPU cores of the deployment. If we want to increase number of replicas we need to use a synchronizing mechanism by using a database such as Redis with connection pooling and scripts inside Redis server to reduce number of roundtrips by a factor of at least 3.
+
 
 **Application deployed to k3s benchmark**
 
