@@ -22,10 +22,10 @@ spec:
         resources:
           requests:
             cpu: 4 # number of cores
-            memory: "500Mi"
+            memory: "50Mi"
           limits:
             cpu: 4 # fixed because if the number of cores increases golang app needs to be restarted
-            memory: "800Mi"
+            memory: "200Mi"
         livenessProbe:
           httpGet:
             path: /health # health check endpoint
