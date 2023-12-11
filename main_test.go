@@ -33,7 +33,10 @@ func testStatusHandlerConcurrentExecution(t *testing.T, handler func(ctx *fastht
 
 	// Number of concurrent requests
 	var numRequests int = 10
+
+	// The sum of all numbers from 1 to numRequests for assertion
 	var counterTotal int = numRequests * (numRequests + 1) / 2
+
 	var counters []int64
 	var mu sync.Mutex
 	var wg sync.WaitGroup
@@ -57,6 +60,8 @@ func testStatusHandlerConcurrentExecution(t *testing.T, handler func(ctx *fastht
 				t.Errorf("Failed to unmarshal response: %v", err)
 				return
 			}
+
+			// Append the counter to the counters slice
 			mu.Lock()
 			counters = append(counters, actualStatus.Counter)
 			mu.Unlock()
@@ -103,7 +108,7 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// Test and benchmark atomic
+// Test and benchmark atomic handler
 func TestStatusHandlerAtomic_ConcurrentExecution(t *testing.T) {
 	testStatusHandlerConcurrentExecution(t, statusHandlerAtomic)
 }
@@ -120,7 +125,7 @@ func BenchmarkStatusHandlerAtomicParallel(b *testing.B) {
 	benchmarkStatusHandlerParallel(b, statusHandlerAtomic)
 }
 
-// Test and benchmark mutex
+// Test and benchmark mutex handler
 
 func TestStatusHandlerMutex_ConcurrentExecution(t *testing.T) {
 	testStatusHandlerConcurrentExecution(t, statusHandlerMutex)

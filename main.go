@@ -19,7 +19,7 @@ import (
 	"github.com/valyala/fasthttp" // fasthttp is a drop in replacement for net/http
 )
 
-// json returns a JSON response with the given status code and JSON object.
+// ReturnStatus is the struct for the JSON response
 type ReturnStatus struct {
 	Counter     int64     `json:"counter"`
 	Status      bool      `json:"status"`
@@ -27,13 +27,14 @@ type ReturnStatus struct {
 }
 
 // internal for statusHandlerAtomic
+// atomic operations are not available for time.Time so we use int64
 type statusAtomic struct {
 	Counter     int64
 	Status      int64 // 0 = false, 1 = true - so we can use atomic
 	LastChanged int64 // Now as int64 - Unix time so we can use atomic operations
 }
 
-// for status atomic is the most performant
+// for status atomic version
 var status statusAtomic
 
 // statusV2 with a mutex version
@@ -47,8 +48,9 @@ func init() {
 
 	log.Printf("Number of CPU cores available on node: %d\n", runtime.NumCPU())
 
+	// log the cpu limit imposed by k8s to be able to test cpu limits in yaml
+	// not all k8s local implementations support cgroup v2 yet (e.g. kind and k3d)
 	limit, err := getCpuLimit()
-
 	if err != nil {
 		log.Printf("Error getting CPU limit: %s\n", err)
 	} else {
@@ -75,7 +77,7 @@ func statusHandlerAtomic(ctx *fasthttp.RequestCtx) {
 	ctx.SetStatusCode(fasthttp.StatusOK)
 	ctx.Response.Header.Set("Content-Type", "application/json")
 
-	// Write the JSON response to the body
+	// Write the JSON response to the body or error
 	if err := json.NewEncoder(ctx).Encode(responseStatus); err != nil {
 		ctx.Error(err.Error(), fasthttp.StatusInternalServerError)
 	}
@@ -83,6 +85,7 @@ func statusHandlerAtomic(ctx *fasthttp.RequestCtx) {
 
 // statusHandlerMutex is an example of using a mutex to update the status
 func statusHandlerMutex(ctx *fasthttp.RequestCtx) {
+
 	// Lock the mutex to ensure no other goroutine is updating the status
 	statusV2Mutex.Lock()
 
@@ -120,6 +123,7 @@ func readinessHandler(ctx *fasthttp.RequestCtx) {
 // kind and k3d do not support cgroup v2 yet
 // helper function to log the cpu limit imposed by k8s
 func readCgroupFile(path string) (int64, error) {
+
 	file, err := os.Open(path)
 	if err != nil {
 		return 0, err
@@ -179,6 +183,7 @@ func main() {
 
 	// Create a channel to listen for termination signals
 	sigChan := make(chan os.Signal, 1)
+
 	// Catch SIGINT (Ctrl+C) and SIGTERM signals
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
@@ -196,7 +201,8 @@ func main() {
 			ctx.Error("Unsupported path", fasthttp.StatusNotFound)
 		}
 	}
-	// Start your server in a goroutine
+
+	// Start server in a goroutine
 	server := &fasthttp.Server{Handler: h}
 	go func() {
 		if err := server.ListenAndServe(":8080"); err != nil {
@@ -209,6 +215,7 @@ func main() {
 	log.Println("Shutting down server...")
 
 	shutdownErr := server.Shutdown()
+
 	if shutdownErr != nil {
 		log.Fatalf("Error during shutdown: %s", shutdownErr)
 	}
