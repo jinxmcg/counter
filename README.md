@@ -9,8 +9,17 @@ Scalability can be achieved not by scaling number of replicas but by scaling the
 ## API Endpoints
 
 - `/status`: Increments the counter and returns its current value. The counter is stored in memory and will be reset if the application restarts. It uses atomic operations for incrementing the counter
+```
+curl http://127.0.0.1/status
 
+{"counter":305689,"status":false,"lastChanged":"2023-12-11T04:45:08Z"}
+```
 - `/statusV2`: Similar to `/status`, but uses a mutex for synchronization instead of atomic operations.
+```
+curl http://127.0.0.1/statusV2
+
+{"counter":305689,"status":false,"lastChanged":"2023-12-11T04:45:08Z"}
+```
 
 - `/health`: Returns a 200 OK response. Used for liveness probes in a Kubernetes environment.
 
@@ -55,6 +64,7 @@ ok      counter 0.012s
 
 ```
 ➜  counter git:(main) ✗ go test -bench=. -benchmem
+
 2023/12/10 15:08:02 Inited counter app
 2023/12/10 15:08:02 Number of CPU cores available on node: 20
 2023/12/10 15:08:02 CPU Limit imposed by k8s (cgroup): 20.00 cores
@@ -75,11 +85,15 @@ ok      counter 8.702s
 
 The application can be deployed in a Kubernetes environment. A `Dockerfile` is provided for building a Docker image of the application, and a `kubernetes.yaml` file is provided for creating a Kubernetes Deployment, Service and Ingress.
 
-To build the Docker image, run: `DOCKER_BUILDKIT=1 docker build . --tag counter:v0.3`
+To build the Docker image, run: 
+
+`DOCKER_BUILDKIT=1 docker build . --tag counter:v0.3` v0.3 is the tag used in kubernetes.yaml
 
 **Tests are also run during the build process in the Dockerfile**
 
-To deploy the application to Kubernetes, run: `kubectl apply -f kubernetes.yaml`
+To deploy the application to Kubernetes, run: 
+
+`kubectl apply -f kubernetes.yaml`
 
 The Kubernetes Deployment includes liveness and readiness probes that hit the `/health` and `/ready` endpoints, respectively. The Deployment also includes resource requests and limits to ensure the application has enough CPU and memory resources.
 
@@ -91,7 +105,11 @@ In Go benchmarks, the atomic operations (/status endpoint) outperform mutex-base
 However, in a real-world K8s environment, the situation changes. High concurrency and frequent context switching can make atomic operations less efficient due to cache coherency issues. Mutexes, despite their higher overhead, can sometimes be more efficient in such scenarios because they reduce the frequency of cache invalidation across cores.
 
 **Application deployed to k3s benchmark**
+
+Performed on Intel(R) Core(TM) i9-7900X CPU @ 3.30GHz. https://github.com/tsliwowicz/go-wrk was used to benchmark the application.
 ```
+➜  counter git:(main) go-wrk -c 80 -d 5 http://127.0.0.1/status
+
 Running 5s test @ http://127.0.0.1/status
   80 goroutine(s) running concurrently
 119826 requests in 4.896115935s, 20.51MB read
@@ -104,6 +122,8 @@ Number of Errors:       0
 ```
 
 ```
+➜  counter git:(main) go-wrk -c 80 -d 5 http://127.0.0.1/statusV2
+
 Running 5s test @ http://127.0.0.1/statusV2
   80 goroutine(s) running concurrently
 128802 requests in 4.872268606s, 23.14MB read
