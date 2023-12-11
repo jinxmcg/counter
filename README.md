@@ -149,3 +149,5 @@ The application uses the `fasthttp` package instead of the standard `net/http` p
 - [ ] run Redis benchmarks and tests too
 - [ ] create a docker compose file for running the application and db locally
 - [ ] update kubernetes.yaml to deploy Redis too
+- [ ] add a Makefile for building and running the application
+- [ ] migrate helper CPU limit read functions to a separate package and evaluate if they are still needed
