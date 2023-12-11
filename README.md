@@ -25,6 +25,9 @@ curl http://127.0.0.1/statusV2
 
 - `/ready`: Returns a 200 OK response. Used for readiness probes in a Kubernetes environment.
 
+
+In case of errors the application returns a 500 Internal Server Error response or 404 Not Found response depending on the case.
+
 ## Running the Application Locally and developing
 
 1. Install Go: Follow the instructions at https://golang.org/doc/install to download and install Go.
