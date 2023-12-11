@@ -139,3 +139,8 @@ The application uses the `fasthttp` package instead of the standard `net/http` p
 
 *Dockerfile* uses a multi-stage build to reduce the size of the Docker image. The final image is only 12.9MB. It also caches the packages to speed up the build process. The packages are downloaded only if the go.mod or go.sum files change.
 
+## TODO
+- [ ] make a demo with synchronization for many pods using db from the Redis branch
+- [ ] run Redis benchmarks and tests too
+- [ ] create a docker compose file for running the application and db locally
+- [ ] update kubernetes.yaml to deploy Redis too
